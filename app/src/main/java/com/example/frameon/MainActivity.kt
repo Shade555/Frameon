@@ -2,6 +2,9 @@
 package com.example.frameon
 
 import android.Manifest
+import android.app.Activity
+import android.app.PendingIntent
+import android.content.IntentSender
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
@@ -10,15 +13,22 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.biometric.BiometricManager
+import androidx.biometric.BiometricPrompt
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.core.content.ContextCompat
 import androidx.core.net.toUri
+import androidx.fragment.app.FragmentActivity
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
@@ -33,9 +43,10 @@ import com.example.frameon.ui.gallery.MediaDetailScreen
 import com.example.frameon.ui.gallery.MediaDetailViewModel
 import com.example.frameon.ui.theme.FrameonTheme
 import dagger.hilt.android.AndroidEntryPoint
+import java.util.concurrent.Executor
 
 @AndroidEntryPoint
-class MainActivity : ComponentActivity() {
+class MainActivity : FragmentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -43,7 +54,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             FrameonTheme {
                 var hasPermissions by remember {
-                    mutableStateOf(hasReadMediaPermission())
+                    mutableStateOf(hasRequiredPermissions())
                 }
 
                 val launcher = rememberLauncherForActivityResult(
@@ -54,12 +65,15 @@ class MainActivity : ComponentActivity() {
 
                 LaunchedEffect(key1 = hasPermissions) {
                     if (!hasPermissions) {
-                        val permissions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                            arrayOf(Manifest.permission.READ_MEDIA_IMAGES, Manifest.permission.READ_MEDIA_VIDEO)
+                        val permissions = mutableListOf<String>()
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                            permissions.add(Manifest.permission.READ_MEDIA_IMAGES)
+                            permissions.add(Manifest.permission.READ_MEDIA_VIDEO)
+                            permissions.add(Manifest.permission.POST_NOTIFICATIONS)
                         } else {
-                            arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
+                            permissions.add(Manifest.permission.READ_EXTERNAL_STORAGE)
                         }
-                        launcher.launch(permissions)
+                        launcher.launch(permissions.toTypedArray())
                     }
                 }
 
@@ -67,7 +81,7 @@ class MainActivity : ComponentActivity() {
                     GalleryContent()
                 } else {
                     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Text(text = "Please grant permissions to access media.")
+                        Text(text = "Please grant permissions to access media and notifications.")
                     }
                 }
             }
@@ -80,6 +94,53 @@ class MainActivity : ComponentActivity() {
         NavHost(navController = navController, startDestination = "gallery") {
             composable("gallery") {
                 val viewModel: GalleryViewModel = hiltViewModel()
+                val deleteLauncher = rememberLauncherForActivityResult(
+                    ActivityResultContracts.StartIntentSenderForResult()
+                ) { result ->
+                    if (result.resultCode == Activity.RESULT_OK) {
+                        viewModel.consumeDeleteRequest()
+                    }
+                }
+
+                val deleteRequest by viewModel.deleteRequest.collectAsState()
+                var showExplanation by remember { mutableStateOf(false) }
+
+                LaunchedEffect(deleteRequest) {
+                    if (deleteRequest != null) {
+                        showExplanation = true
+                    }
+                }
+
+                if (showExplanation) {
+                    AlertDialog(
+                        onDismissRequest = { 
+                            showExplanation = false
+                            viewModel.consumeDeleteRequest()
+                        },
+                        title = { Text("Secure Folder") },
+                        text = { Text("Allow Frameon to move it to secure folder?\n\n(Note: Android will now ask for permission to 'delete' the photo. This is required to hide it from your public gallery.)") },
+                        confirmButton = {
+                            Button(onClick = {
+                                showExplanation = false
+                                deleteRequest?.let {
+                                    val request = IntentSenderRequest.Builder(it.intentSender).build()
+                                    deleteLauncher.launch(request)
+                                }
+                            }) {
+                                Text("Allow")
+                            }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = {
+                                showExplanation = false
+                                viewModel.consumeDeleteRequest()
+                            }) {
+                                Text("Cancel")
+                            }
+                        }
+                    )
+                }
+
                 GalleryScreen(
                     viewModel = viewModel,
                     onMediaClick = {
@@ -89,6 +150,11 @@ class MainActivity : ComponentActivity() {
                     onNavigateToCollage = {
                         val uris = it.joinToString(",") { item -> Uri.encode(item.uri.toString()) }
                         navController.navigate("collage/$uris")
+                    },
+                    onTitleLongClick = {
+                        showBiometricPrompt {
+                            viewModel.enterSecureMode()
+                        }
                     }
                 )
             }
@@ -120,20 +186,44 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun hasReadMediaPermission(): Boolean {
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            ContextCompat.checkSelfPermission(
-                this,
-                Manifest.permission.READ_MEDIA_IMAGES
-            ) == PackageManager.PERMISSION_GRANTED && ContextCompat.checkSelfPermission(
-                this,
-                Manifest.permission.READ_MEDIA_VIDEO
-            ) == PackageManager.PERMISSION_GRANTED
+    private fun showBiometricPrompt(onSuccess: () -> Unit) {
+        val biometricManager = BiometricManager.from(this)
+        val authenticators = BiometricManager.Authenticators.BIOMETRIC_STRONG or BiometricManager.Authenticators.DEVICE_CREDENTIAL
+        
+        if (biometricManager.canAuthenticate(authenticators) == BiometricManager.BIOMETRIC_SUCCESS) {
+            val executor = ContextCompat.getMainExecutor(this)
+            val biometricPrompt = BiometricPrompt(this, executor,
+                object : BiometricPrompt.AuthenticationCallback() {
+                    override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
+                        super.onAuthenticationSucceeded(result)
+                        onSuccess()
+                    }
+                })
+
+            val promptInfo = BiometricPrompt.PromptInfo.Builder()
+                .setTitle("Secure Folder Access")
+                .setSubtitle("Allow Frameon to move it to secure folder")
+                .setAllowedAuthenticators(authenticators)
+                .build()
+
+            biometricPrompt.authenticate(promptInfo)
         } else {
-            ContextCompat.checkSelfPermission(
-                this,
-                Manifest.permission.READ_EXTERNAL_STORAGE
-            ) == PackageManager.PERMISSION_GRANTED
+            onSuccess()
+        }
+    }
+
+    private fun hasRequiredPermissions(): Boolean {
+        val permissions = mutableListOf<String>()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            permissions.add(Manifest.permission.READ_MEDIA_IMAGES)
+            permissions.add(Manifest.permission.READ_MEDIA_VIDEO)
+            permissions.add(Manifest.permission.POST_NOTIFICATIONS)
+        } else {
+            permissions.add(Manifest.permission.READ_EXTERNAL_STORAGE)
+        }
+        
+        return permissions.all {
+            ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED
         }
     }
 }

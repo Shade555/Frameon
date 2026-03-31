@@ -1,36 +1,41 @@
-# Frameon Gallery App
+# Frameon - Professional Gallery & Security Suite
 
-Frameon is a simple, modern gallery app for Android that lets you view and manage your photos and videos. It also includes a fun feature for creating custom-shaped photo collages.
+Frameon is a high-performance Android gallery app built with **Clean Architecture** and **Jetpack Compose**. It blends standard media management with advanced AI-driven security and creative tools.
 
-## Features
+## 🚀 Key Features
 
-### 1. Your Media, All in One Place
+### 1. Smart Media Gallery
+*   **Real-time Synchronization:** Uses `ContentObserver` and `callbackFlow` to instantly reflect new photos or downloads without refreshing.
+*   **Temporal Grouping:** Automatically organizes media into elegant sections by Month and Year.
+*   **Unified Media Support:** Seamlessly handles images, videos, and downloads in a single, performant grid.
 
-*   **See Everything:** The app automatically finds and displays all the photos and videos on your device.
-*   **Always Up-to-Date:** The gallery refreshes in real-time. When you take a new photo or download an image, it appears instantly without you having to do anything.
-*   **Organized by Date:** Your media is automatically grouped by the month and year it was created, making it easy to find what you're looking for.
+### 2. AI-Driven Security (Pro-Active Protection)
+*   **Background OCR Scanning:** Leverages **Google ML Kit** to scan new images for sensitive data (passwords, SSNs, credit cards) even when the app is completely closed.
+*   **Spatial Analysis:** Uses geometric logic to link labels (e.g., "Password:") to their corresponding values, reducing false positives.
+*   **Luhn Validation:** Validates 16-digit numbers against banking algorithms to accurately identify credit cards.
+*   **Urgent Alerts:** Triggers high-priority notifications with custom vibration patterns to warn users of privacy leaks.
 
-### 2. Full-Screen Viewer
+### 3. Biometric Secure Folder
+*   **Encrypted Logic:** Moves sensitive media from public Scoped Storage to the app's **private internal directory**, making them invisible to all other apps.
+*   **Smart Auth:** Integrated with **Android Biometrics**. Long-press the app title to enter; if no phone lock is set, it allows direct access.
+*   **Ghost-Copy Prevention:** Implements professional `MediaStore` deletion requests to ensure no "ghost" duplicates remain in the public gallery.
 
-*   **Click to View:** Tap on any photo or video to see it in a full-screen, distraction-free view.
-*   **Pinch to Zoom:** Get a closer look at your photos by using the standard pinch-to-zoom gesture.
-*   **Photo Details (EXIF Data):** While viewing a photo, tap the "Show Info" button at the bottom. A panel will slide up revealing technical details about the photo, such as:
-    *   Date and time it was taken
-    *   Image dimensions (width and height)
-    *   Camera model
-    *   File type
-    *   Location (if available)
+### 4. Creative Suite
+*   **Collage Creator:** Supports multi-selection and real-time previewing.
+*   **Custom Geometry:** Uses `GenericShape` to clip photos into Squares, Circles, or complex Stars.
+*   **Direct Export:** Saves processed collages directly back to a dedicated "Frameon" folder in the system gallery.
 
-### 3. Collage Creator
+## 🛠 Hurdles Overcome
 
-*   **Select Multiple Photos:** Long-press on any photo in the gallery to start selecting multiple images.
-*   **Choose a Shape:** Once you've selected your photos, tap the "Create Collage" button. On the next screen, you can choose a shape for your collage, including:
-    *   Circle
-    *   Square
-    *   Star
-*   **Live Preview:** See a live preview of how your collage will look before you save it.
-*   **Save Your Creation:** Tap the "Save Collage" button to save your finished collage as a new image in a "Frameon" folder inside your phone's main "Pictures" directory.
+*   **Scoped Storage Restrictions:** Solved the "cannot delete files created by other apps" issue by implementing `MediaStore.createDeleteRequest` with a user-friendly explanation dialog.
+*   **Background Persistence:** Solved the "app closed" detection problem using **WorkManager Content URI Triggers**, allowing the OS to wake the app for security scans.
+*   **Notification Reliability:** Overcame Android's notification channel caching by implementing versioned Channel IDs to force update vibration and importance settings.
+*   **OCR Geometry:** Fixed the "Password on new line" detection by flattening text blocks and calculating physical proximity between text elements.
 
-## How It's Built
-
-The app is built using modern Android development practices with a clean architecture. This separates the app's logic into different layers (UI, business logic, and data), making it easier to maintain and add new features in the future.
+## 🏗 Tech Stack
+*   **Language:** Kotlin (Coroutines, Flow)
+*   **UI:** Jetpack Compose (Material 3)
+*   **DI:** Hilt (Dagger)
+*   **Async:** WorkManager
+*   **AI:** Google ML Kit (Bundled OCR)
+*   **Image Loading:** Coil
