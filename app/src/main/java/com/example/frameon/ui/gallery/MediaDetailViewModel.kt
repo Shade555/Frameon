@@ -47,9 +47,9 @@ class MediaDetailViewModel @Inject constructor(
         object Error : GeotagState
     }
 
-    fun loadExifData(uri: Uri) {
+    fun loadExifData(uri: Uri, context: Context) {
         viewModelScope.launch {
-            _exifData.value = getExifData(uri)
+            _exifData.value = getExifData(uri, context)
         }
     }
 
@@ -87,7 +87,6 @@ class MediaDetailViewModel @Inject constructor(
             val w = mutableBitmap.width.toFloat()
             val h = mutableBitmap.height.toFloat()
             
-            // Refined Unit Scale
             val unit = w / 160f
             val padding = unit * 6f 
             val spacing = unit * 2.2f
@@ -97,13 +96,10 @@ class MediaDetailViewModel @Inject constructor(
             val mapSize = unit * 22f
             val textLeft = padding + mapSize + padding
             
-            // INCREASED SAFETY ZONE: 20% gutter on the right side
             val safeRightMargin = w * 0.20f
             val availableWidth = (w - textLeft - safeRightMargin).toInt().coerceAtLeast(100)
 
-            // 1. Prepare Text Layouts with forced wrapping
             textPaint.color = Color.WHITE
-            
             textPaint.textSize = headerTextSize
             textPaint.typeface = Typeface.DEFAULT_BOLD
             val cityLayout = StaticLayout.Builder.obtain(cityLine, 0, cityLine.length, textPaint, availableWidth)
@@ -127,17 +123,14 @@ class MediaDetailViewModel @Inject constructor(
             val dateLayout = StaticLayout.Builder.obtain(dateText, 0, dateText.length, textPaint, availableWidth)
                 .setAlignment(Layout.Alignment.ALIGN_NORMAL).build()
 
-            // Dynamic height calculation
             val totalTextHeight = cityLayout.height + spacing + addressLayout.height + spacing + 
                                  latLayout.height + (spacing / 2) + lngLayout.height + spacing + dateLayout.height
             val finalOverlayHeight = maxOf(totalTextHeight, mapSize) + (padding * 2)
             val barTop = h - finalOverlayHeight
 
-            // 2. Draw Main Overlay background
             paint.color = Color.parseColor("#B0000000")
             canvas.drawRect(0f, barTop, w, h, paint)
 
-            // 3. Draw "Frameon" Tag (Top Right, extreme edge)
             val tagText = "Frameon"
             textPaint.textSize = unit * 3.8f
             textPaint.typeface = Typeface.DEFAULT_BOLD
@@ -155,14 +148,12 @@ class MediaDetailViewModel @Inject constructor(
             canvas.drawRect(tagLeft, tagTop, w, barTop + tagOverlap, paint)
             canvas.drawText(tagText, tagLeft + tagHorizPadding, tagTop + tagVertPadding + (textPaint.textSize * 0.85f), textPaint)
 
-            // 4. Draw Map Thumbnail
             val mapTop = barTop + (finalOverlayHeight - mapSize) / 2
             paint.color = Color.parseColor("#40FFFFFF")
             canvas.drawRect(padding, mapTop, padding + mapSize, mapTop + mapSize, paint)
             paint.color = Color.RED
             canvas.drawCircle(padding + (mapSize/2), mapTop + (mapSize/2), mapSize/10, paint)
 
-            // 5. Draw Content Sections
             var currentY = barTop + padding
             
             fun drawBlock(layout: StaticLayout, verticalGap: Float) {
@@ -179,7 +170,6 @@ class MediaDetailViewModel @Inject constructor(
             drawBlock(lngLayout, spacing)
             drawBlock(dateLayout, 0f)
 
-            // 6. Save image
             val contentValues = ContentValues().apply {
                 put(MediaStore.MediaColumns.DISPLAY_NAME, "Geotag_Pro_${System.currentTimeMillis()}.jpg")
                 put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
@@ -189,7 +179,9 @@ class MediaDetailViewModel @Inject constructor(
                 }
             }
 
-            val targetUri = contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, contentValues)
+            val collection = MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+            val targetUri = contentResolver.insert(collection, contentValues)
+
             targetUri?.let { uri ->
                 contentResolver.openOutputStream(uri)?.use { out ->
                     mutableBitmap.compress(Bitmap.CompressFormat.JPEG, 100, out)
@@ -207,25 +199,59 @@ class MediaDetailViewModel @Inject constructor(
         }
     }
 
-    private suspend fun getExifData(uri: Uri): Map<String, String> = withContext(Dispatchers.IO) {
+    private suspend fun getExifData(uri: Uri, context: Context): Map<String, String> = withContext(Dispatchers.IO) {
         val exifMap = mutableMapOf<String, String>()
         try {
-            contentResolver.openInputStream(uri)?.use { inputStream ->
+            val photoUri = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                MediaStore.setRequireOriginal(uri)
+            } else {
+                uri
+            }
+
+            contentResolver.openInputStream(photoUri)?.use { inputStream ->
                 val exifInterface = ExifInterface(inputStream)
                 exifMap["File Type"] = contentResolver.getType(uri) ?: "N/A"
                 exifMap["Date"] = exifInterface.getAttribute(ExifInterface.TAG_DATETIME) ?: "N/A"
                 exifMap["Image Size"] = "${exifInterface.getAttribute(ExifInterface.TAG_IMAGE_WIDTH)} x ${exifInterface.getAttribute(ExifInterface.TAG_IMAGE_LENGTH)}"
                 exifMap["Camera Model"] = exifInterface.getAttribute(ExifInterface.TAG_MODEL) ?: "N/A"
                 
-                exifInterface.latLong?.let {
-                    exifMap["Location"] = "${it[0]}, ${it[1]}"
-                    exifMap["Latitude"] = it[0].toString()
-                    exifMap["Longitude"] = it[1].toString()
+                exifInterface.latLong?.let { latLong ->
+                    exifMap["Latitude"] = latLong[0].toString()
+                    exifMap["Longitude"] = latLong[1].toString()
+                    
+                    // Use Geocoder to get the actual address
+                    try {
+                        val geocoder = Geocoder(context, Locale.getDefault())
+                        val addresses = geocoder.getFromLocation(latLong[0], latLong[1], 1)
+                        exifMap["Location"] = addresses?.firstOrNull()?.getAddressLine(0) ?: "${latLong[0]}, ${latLong[1]}"
+                    } catch (e: Exception) {
+                        exifMap["Location"] = "${latLong[0]}, ${latLong[1]}"
+                    }
                 } ?: run {
                     exifMap["Location"] = "N/A"
                 }
             }
-        } catch (e: IOException) {}
+        } catch (e: Exception) {
+            try {
+                contentResolver.openInputStream(uri)?.use { inputStream ->
+                    val exifInterface = ExifInterface(inputStream)
+                    exifInterface.latLong?.let { latLong ->
+                        exifMap["Latitude"] = latLong[0].toString()
+                        exifMap["Longitude"] = latLong[1].toString()
+                        
+                        try {
+                            val geocoder = Geocoder(context, Locale.getDefault())
+                            val addresses = geocoder.getFromLocation(latLong[0], latLong[1], 1)
+                            exifMap["Location"] = addresses?.firstOrNull()?.getAddressLine(0) ?: "${latLong[0]}, ${latLong[1]}"
+                        } catch (e: Exception) {
+                            exifMap["Location"] = "${latLong[0]}, ${latLong[1]}"
+                        }
+                    } ?: run {
+                        exifMap["Location"] = "N/A"
+                    }
+                }
+            } catch (inner: IOException) {}
+        }
         exifMap
     }
 }
