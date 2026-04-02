@@ -75,8 +75,10 @@ dependencies {
     implementation("com.google.mlkit:text-recognition:16.0.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.8.1")
 
-    // Biometric Authentication for Secure Folder
     implementation("androidx.biometric:biometric-ktx:1.2.0-alpha05")
+
+    // OpenStreetMap (OSM) for Map Picker
+    implementation("org.osmdroid:osmdroid-android:6.1.18")
 
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")

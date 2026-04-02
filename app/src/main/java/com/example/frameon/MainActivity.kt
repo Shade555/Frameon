@@ -3,13 +3,10 @@ package com.example.frameon
 
 import android.Manifest
 import android.app.Activity
-import android.app.PendingIntent
-import android.content.IntentSender
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
-import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -39,11 +36,11 @@ import com.example.frameon.ui.collage.CollageScreen
 import com.example.frameon.ui.collage.CollageViewModel
 import com.example.frameon.ui.gallery.GalleryScreen
 import com.example.frameon.ui.gallery.GalleryViewModel
+import com.example.frameon.ui.gallery.MapPickerScreen
 import com.example.frameon.ui.gallery.MediaDetailScreen
 import com.example.frameon.ui.gallery.MediaDetailViewModel
 import com.example.frameon.ui.theme.FrameonTheme
 import dagger.hilt.android.AndroidEntryPoint
-import java.util.concurrent.Executor
 
 @AndroidEntryPoint
 class MainActivity : FragmentActivity() {
@@ -167,7 +164,11 @@ class MainActivity : FragmentActivity() {
                 MediaDetailScreen(
                     uri = Uri.decode(uriString).toUri(),
                     viewModel = viewModel,
-                    onBackClick = { navController.popBackStack() }
+                    onBackClick = { navController.popBackStack() },
+                    onNavigateToMapPicker = {
+                        val encodedUrl = Uri.encode(uriString)
+                        navController.navigate("map_picker/$encodedUrl")
+                    }
                 )
             }
             composable(
@@ -180,6 +181,20 @@ class MainActivity : FragmentActivity() {
                 CollageScreen(
                     imageUris = uris,
                     viewModel = viewModel,
+                    onBackClick = { navController.popBackStack() }
+                )
+            }
+            composable(
+                "map_picker/{uri}",
+                arguments = listOf(navArgument("uri") { type = NavType.StringType })
+            ) {
+                val uriString = it.arguments?.getString("uri") ?: ""
+                val viewModel: MediaDetailViewModel = hiltViewModel()
+                MapPickerScreen(
+                    onLocationSelected = { lat, lng ->
+                        viewModel.addGeotag(this@MainActivity, Uri.decode(uriString).toUri(), lat, lng)
+                        navController.popBackStack()
+                    },
                     onBackClick = { navController.popBackStack() }
                 )
             }
